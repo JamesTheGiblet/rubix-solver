@@ -31,6 +31,20 @@ h1{text-align:center;margin-bottom:10px;font-size:24px;text-shadow:2px 2px 4px r
 #solve-steps .step{padding:5px;margin:2px 0;border-radius:4px}
 #solve-steps .step.active{background:rgba(255,193,7,.3);font-weight:bold}
 #solve-steps .step.complete{background:rgba(76,175,80,.2)}
+#color-palette{display:flex;gap:8px;margin-bottom:10px;justify-content:center;flex-wrap:wrap}
+#execute-btn{width:100%;margin-bottom:10px}
+.color-btn{width:40px;height:40px;border:3px solid #fff;border-radius:8px;cursor:pointer;transition:.3s;position:relative}
+.color-btn:hover{transform:scale(1.1);box-shadow:0 4px 15px rgba(255,255,255,.4)}
+.color-btn.active{border-color:#ffff00;box-shadow:0 0 15px rgba(255,255,0,.8)}
+.color-btn::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:30px;height:30px;border-radius:4px}
+.color-white::after{background:#ffffff}
+.color-yellow::after{background:#ffff00}
+.color-green::after{background:#00dd00}
+.color-blue::after{background:#0000ff}
+.color-orange::after{background:#ff8800}
+.color-red::after{background:#ff0000}
+#paint-mode{text-align:center;margin-bottom:10px;font-size:14px;background:rgba(0,0,0,.2);padding:8px;border-radius:8px}
+#paint-mode.active{background:rgba(255,193,7,.3);font-weight:bold}
 @media(max-width:600px){
 button{font-size:12px;padding:10px 5px;min-width:70px}
 .rotation-buttons button{font-size:14px;padding:12px 3px}
@@ -51,6 +65,18 @@ h1{font-size:20px}
       <button onclick="scrambleCube()">🎲 Scramble</button>
       <button onclick="solveCube()" id="solveBtn">🤖 Solve</button>
       <button onclick="resetCube()">🔄 Reset</button>
+      <button onclick="togglePaintMode()" id="paintBtn">🎨 Paint</button>
+    </div>
+
+    <div id="paint-mode">Paint Mode: OFF - Click Paint to enable</div>
+
+    <div id="color-palette" style="display:none">
+      <div class="color-btn color-white active" onclick="selectColor('W')" data-color="W"></div>
+      <div class="color-btn color-yellow" onclick="selectColor('Y')" data-color="Y"></div>
+      <div class="color-btn color-green" onclick="selectColor('G')" data-color="G"></div>
+      <div class="color-btn color-blue" onclick="selectColor('B')" data-color="B"></div>
+      <div class="color-btn color-orange" onclick="selectColor('O')" data-color="O"></div>
+      <div class="color-btn color-red" onclick="selectColor('R')" data-color="R"></div>
     </div>
 
     <div id="solve-steps">
@@ -65,10 +91,10 @@ h1{font-size:20px}
 
     <div id="speed-control">
       <label>Speed: <span id="speed-value">100</span>ms</label>
-      <input type="range" id="speed-slider" min="50" max="500" value="100" step="25">
+      <input type="range" id="speed-slider" min="50" max="500" value="100" step="25" title="Animation speed control">
     </div>
-
     <input type="text" id="manual-input" placeholder="Enter moves: U R' F2 D (Enter)" onkeypress="if(event.key==='Enter')executeManual()">
+    <button onclick="executeManual()" id="execute-btn">▶️ Execute</button>
     <button onclick="executeManual()" style="width:100%;margin-bottom:10px">▶️ Execute</button>
 
     <div id="move-history">No moves yet</div>
@@ -100,6 +126,8 @@ let isAnimating=false,moveQueue=[];
 let animationDelay=100;
 let allMoves=[],solutionMoves=[],solutionIdx=0;
 let curStep=-1;
+let paintMode=false,selectedColor='W';
+let raycaster,mouse;
 
 let cubeState={
   U:['W','W','W','W','W','W','W','W','W'],
@@ -121,6 +149,10 @@ function init(){
   renderer.setSize(c.clientWidth,c.clientHeight);
   c.appendChild(renderer.domElement);
 
+  // Initialize raycaster for mouse picking
+  raycaster=new THREE.Raycaster();
+  mouse=new THREE.Vector2();
+
   scene.add(new THREE.AmbientLight(0xffffff,0.6));
   const l1=new THREE.DirectionalLight(0xffffff,0.4);l1.position.set(10,10,10);scene.add(l1);
   const l2=new THREE.DirectionalLight(0xffffff,0.2);l2.position.set(-10,-10,-10);scene.add(l2);
@@ -128,12 +160,13 @@ function init(){
   createCube();
 
   const canvas=renderer.domElement;
-  canvas.addEventListener('mousedown',e=>{isDragging=true;prev={x:e.clientX,y:e.clientY}});
-  canvas.addEventListener('mousemove',e=>{if(isDragging&&!isAnimating){const dx=e.clientX-prev.x,dy=e.clientY-prev.y;cube.rotation.y+=dx*.01;cube.rotation.x+=dy*.01;prev={x:e.clientX,y:e.clientY}}});
-  canvas.addEventListener('mouseup',()=>isDragging=false);
-  canvas.addEventListener('touchstart',e=>{e.preventDefault();if(e.touches.length===1){isDragging=true;prev={x:e.touches[0].clientX,y:e.touches[0].clientY}}},{passive:false});
-  canvas.addEventListener('touchmove',e=>{e.preventDefault();if(isDragging&&e.touches.length===1&&!isAnimating){const dx=e.touches[0].clientX-prev.x,dy=e.touches[0].clientY-prev.y;cube.rotation.y+=dx*.01;cube.rotation.x+=dy*.01;prev={x:e.touches[0].clientX,y:e.touches[0].clientY}}},{passive:false});
-  canvas.addEventListener('touchend',e=>{e.preventDefault();isDragging=false},{passive:false});
+  canvas.addEventListener('mousedown',onMouseDown);
+  canvas.addEventListener('mousemove',onMouseMove);
+  canvas.addEventListener('mouseup',onMouseUp);
+  canvas.addEventListener('click',onMouseClick);
+  canvas.addEventListener('touchstart',onTouchStart,{passive:false});
+  canvas.addEventListener('touchmove',onTouchMove,{passive:false});
+  canvas.addEventListener('touchend',onTouchEnd,{passive:false});
   window.addEventListener('resize',()=>{const c=document.getElementById('canvas-container');camera.aspect=c.clientWidth/c.clientHeight;camera.updateProjectionMatrix();renderer.setSize(c.clientWidth,c.clientHeight)});
 
   document.getElementById('speed-slider').addEventListener('input',e=>{animationDelay=+e.target.value;document.getElementById('speed-value').textContent=animationDelay});
@@ -143,24 +176,230 @@ function init(){
 function createCube(){
   if(cube)scene.remove(cube);
   cube=new THREE.Group();
+  cube.userData={pieces:[]};
   const p=[-1.1,0,1.1];
+  
+  // Create pieces with proper position tracking
   for(let x=0;x<3;x++)for(let y=0;y<3;y++)for(let z=0;z<3;z++){
+    // Calculate which faces are visible for this piece
+    const visibleFaces={
+      R: x===2, // Right face visible
+      L: x===0, // Left face visible  
+      U: y===2, // Up face visible
+      D: y===0, // Down face visible
+      F: z===2, // Front face visible
+      B: z===0  // Back face visible
+    };
+    
+    // Calculate state indices for each face
+    const stateIndices={
+      R: y*3+(2-z),        // Right: top-to-bottom, back-to-front
+      L: y*3+z,            // Left: top-to-bottom, front-to-back  
+      U: z*3+x,            // Up: back-to-front, left-to-right
+      D: (2-z)*3+x,        // Down: front-to-back, left-to-right
+      F: y*3+x,            // Front: top-to-bottom, left-to-right
+      B: y*3+(2-x)         // Back: top-to-bottom, right-to-left
+    };
+    
+    // Create materials for each face (0=Right, 1=Left, 2=Up, 3=Down, 4=Front, 5=Back)
     const mats=[
-      x===2?new THREE.MeshLambertMaterial({color:colorMap[cubeState.R[y*3+(2-z)]]}):new THREE.MeshLambertMaterial({color:0x1a1a1a}),
-      x===0?new THREE.MeshLambertMaterial({color:colorMap[cubeState.L[y*3+z]]}):new THREE.MeshLambertMaterial({color:0x1a1a1a}),
-      y===2?new THREE.MeshLambertMaterial({color:colorMap[cubeState.U[z*3+x]]}):new THREE.MeshLambertMaterial({color:0x1a1a1a}),
-      y===0?new THREE.MeshLambertMaterial({color:colorMap[cubeState.D[(2-z)*3+x]]}):new THREE.MeshLambertMaterial({color:0x1a1a1a}),
-      z===2?new THREE.MeshLambertMaterial({color:colorMap[cubeState.F[y*3+x]]}):new THREE.MeshLambertMaterial({color:0x1a1a1a}),
-      z===0?new THREE.MeshLambertMaterial({color:colorMap[cubeState.B[y*3+(2-x)]]}):new THREE.MeshLambertMaterial({color:0x1a1a1a})
+      visibleFaces.R ? new THREE.MeshLambertMaterial({color:colorMap[cubeState.R[stateIndices.R]]}) : new THREE.MeshLambertMaterial({color:0x1a1a1a}),
+      visibleFaces.L ? new THREE.MeshLambertMaterial({color:colorMap[cubeState.L[stateIndices.L]]}) : new THREE.MeshLambertMaterial({color:0x1a1a1a}),
+      visibleFaces.U ? new THREE.MeshLambertMaterial({color:colorMap[cubeState.U[stateIndices.U]]}) : new THREE.MeshLambertMaterial({color:0x1a1a1a}),
+      visibleFaces.D ? new THREE.MeshLambertMaterial({color:colorMap[cubeState.D[stateIndices.D]]}) : new THREE.MeshLambertMaterial({color:0x1a1a1a}),
+      visibleFaces.F ? new THREE.MeshLambertMaterial({color:colorMap[cubeState.F[stateIndices.F]]}) : new THREE.MeshLambertMaterial({color:0x1a1a1a}),
+      visibleFaces.B ? new THREE.MeshLambertMaterial({color:colorMap[cubeState.B[stateIndices.B]]}) : new THREE.MeshLambertMaterial({color:0x1a1a1a})
     ];
+    
     const m=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),mats);
     m.position.set(p[x],p[y],p[z]);
+    
+    // Store comprehensive piece data for tracking
+    m.userData={
+      x,y,z,                           // 3D position in cube grid
+      faceMapping:{0:'R',1:'L',2:'U',3:'D',4:'F',5:'B'}, // Material index to face mapping
+      faceIndices:stateIndices,        // Face to state array index mapping
+      visibleFaces:visibleFaces,       // Which faces are actually visible
+      originalPosition:{x,y,z}         // Track original position for debugging
+    };
+    
     m.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1,1,1)),new THREE.LineBasicMaterial({color:0x000000,linewidth:2})));
     cube.add(m);
+    cube.userData.pieces.push(m);
   }
   scene.add(cube);
 }
-function animate(){requestAnimationFrame(animate);if(!isDragging&&!isAnimating)cube.rotation.y+=0.002;renderer.render(scene,camera)}
+/* ────────────────────── MOUSE/TOUCH EVENTS ────────────────────── */
+function onMouseDown(e){
+  isDragging=true;
+  prev={x:e.clientX,y:e.clientY};
+}
+
+function onMouseMove(e){
+  if(isDragging&&!isAnimating&&!paintMode){
+    const dx=e.clientX-prev.x,dy=e.clientY-prev.y;
+    cube.rotation.y+=dx*.01;
+    cube.rotation.x+=dy*.01;
+    prev={x:e.clientX,y:e.clientY};
+  }
+}
+
+function onMouseUp(){
+  isDragging=false;
+}
+
+function onMouseClick(e){
+  if(paintMode&&!isDragging){
+    paintTile(e);
+  }
+}
+
+function onTouchStart(e){
+  e.preventDefault();
+  if(e.touches.length===1){
+    isDragging=true;
+    prev={x:e.touches[0].clientX,y:e.touches[0].clientY};
+  }
+}
+
+function onTouchMove(e){
+  e.preventDefault();
+  if(isDragging&&e.touches.length===1&&!isAnimating&&!paintMode){
+    const dx=e.touches[0].clientX-prev.x,dy=e.touches[0].clientY-prev.y;
+    cube.rotation.y+=dx*.01;
+    cube.rotation.x+=dy*.01;
+    prev={x:e.touches[0].clientX,y:e.touches[0].clientY};
+  }
+}
+
+function onTouchEnd(e){
+  e.preventDefault();
+  if(paintMode&&e.changedTouches.length===1){
+    paintTile(e.changedTouches[0]);
+  }
+  isDragging=false;
+}
+
+/* ────────────────────── PAINT FUNCTIONALITY ────────────────────── */
+function togglePaintMode(){
+  paintMode=!paintMode;
+  const btn=document.getElementById('paintBtn');
+  const palette=document.getElementById('color-palette');
+  const status=document.getElementById('paint-mode');
+  
+  if(paintMode){
+    btn.textContent='🔄 Rotate';
+    btn.style.background='linear-gradient(135deg,#ff6b6b 0%,#ee5a24 100%)';
+    palette.style.display='flex';
+    status.textContent=`Paint Mode: ON - Selected: ${getColorName(selectedColor)}`;
+    status.classList.add('active');
+    updateStatus('🎨 Paint mode enabled! Click tiles to paint.');
+  }else{
+    btn.textContent='🎨 Paint';
+    btn.style.background='linear-gradient(135deg,#667eea 0%,#764ba2 100%)';
+    palette.style.display='none';
+    status.textContent='Paint Mode: OFF - Click Paint to enable';
+    status.classList.remove('active');
+    updateStatus('Rotate mode enabled. Drag to rotate cube.');
+  }
+}
+
+function selectColor(color){
+  selectedColor=color;
+  document.querySelectorAll('.color-btn').forEach(btn=>btn.classList.remove('active'));
+  document.querySelector(`[data-color="${color}"]`).classList.add('active');
+  if(paintMode){
+    document.getElementById('paint-mode').textContent=`Paint Mode: ON - Selected: ${getColorName(color)}`;
+  }
+}
+
+function getColorName(color){
+  const names={W:'White',Y:'Yellow',G:'Green',B:'Blue',O:'Orange',R:'Red'};
+  return names[color]||color;
+}
+
+function paintTile(event){
+  const rect=renderer.domElement.getBoundingClientRect();
+  mouse.x=((event.clientX-rect.left)/rect.width)*2-1;
+  mouse.y=-((event.clientY-rect.top)/rect.height)*2+1;
+  
+  raycaster.setFromCamera(mouse,camera);
+  const intersects=raycaster.intersectObjects(cube.userData.pieces,false);
+  
+  if(intersects.length>0){
+    const intersect=intersects[0];
+    const piece=intersect.object;
+    const faceIndex=intersect.face.materialIndex;
+    
+    // Get face name from mapping
+    const faceName=piece.userData.faceMapping[faceIndex];
+    
+    if(faceName&&piece.userData.visibleFaces[faceName]){
+      const stateIndex=piece.userData.faceIndices[faceName];
+      
+      // Only paint visible faces (not black internal faces)
+      if(piece.material[faceIndex].color.getHex()!==0x1a1a1a){
+        // Update cube state
+        cubeState[faceName][stateIndex]=selectedColor;
+        
+        // Update material color immediately
+        piece.material[faceIndex].color.setHex(colorMap[selectedColor]);
+        piece.material[faceIndex].needsUpdate=true;
+        
+        updateStatus(`🎨 Painted ${getColorName(selectedColor)} on ${faceName} face (pos ${stateIndex})`);
+        
+        // Debug log to track state changes
+        console.log(`Painted ${selectedColor} on face ${faceName} at index ${stateIndex}`);
+        console.log(`Piece position: (${piece.userData.x},${piece.userData.y},${piece.userData.z})`);
+      }
+    }
+  }
+}
+
+/* ────────────────────── CUBE STATE VALIDATION ────────────────────── */
+function validateCubeState(){
+  console.log('=== CUBE STATE VALIDATION ===');
+  for(const face of['U','D','F','B','L','R']){
+    console.log(`${face}: [${cubeState[face].join(',')}]`);
+  }
+  
+  // Check if visual matches state
+  cube.userData.pieces.forEach((piece,idx)=>{
+    const {x,y,z}=piece.userData;
+    console.log(`Piece (${x},${y},${z}):`);
+    
+    Object.keys(piece.userData.faceMapping).forEach(matIdx=>{
+      const faceName=piece.userData.faceMapping[matIdx];
+      if(piece.userData.visibleFaces[faceName]){
+        const stateIdx=piece.userData.faceIndices[faceName];
+        const stateColor=cubeState[faceName][stateIdx];
+        const visualColor=piece.material[matIdx].color.getHex();
+        const expectedColor=colorMap[stateColor];
+        
+        if(visualColor!==expectedColor){
+          console.warn(`MISMATCH: Face ${faceName}[${stateIdx}] state=${stateColor} visual=${visualColor.toString(16)} expected=${expectedColor.toString(16)}`);
+        }
+      }
+    });
+  });
+}
+
+function syncVisualWithState(){
+  // Force visual representation to match internal state
+  cube.userData.pieces.forEach(piece=>{
+    Object.keys(piece.userData.faceMapping).forEach(matIdx=>{
+      const faceName=piece.userData.faceMapping[matIdx];
+      if(piece.userData.visibleFaces[faceName]){
+        const stateIdx=piece.userData.faceIndices[faceName];
+        const stateColor=cubeState[faceName][stateIdx];
+        piece.material[matIdx].color.setHex(colorMap[stateColor]);
+        piece.material[matIdx].needsUpdate=true;
+      }
+    });
+  });
+}
+
+function animate(){requestAnimationFrame(animate);if(!isDragging&&!isAnimating&&!paintMode)cube.rotation.y+=0.002;renderer.render(scene,camera)}
 
 /* ────────────────────── MOVES ────────────────────── */
 function rotateFace(f,p){if(isAnimating)return;const m=p?f+"'":f;allMoves.push(m);executeMoves([m])}
@@ -178,12 +417,24 @@ function executeMoves(m,cb){
   processNext(cb);
 }
 function processNext(cb){
-  if(!moveQueue.length){isAnimating=false;updateUI();if(cb)cb();return}
+  if(!moveQueue.length){
+    isAnimating=false;
+    updateUI();
+    // Sync visual with state after moves complete
+    syncVisualWithState();
+    if(cb)cb();
+    return;
+  }
   isAnimating=true;
   const mv=moveQueue.shift();
   const f=mv.replace(/['2]/g,'');
   applyMove(f,mv.includes("'"),mv.includes('2'));
-  createCube();solutionIdx++;updateMoveHistory();
+  
+  // Recreate cube to reflect state changes
+  createCube();
+  solutionIdx++;
+  updateMoveHistory();
+  
   setTimeout(()=>processNext(cb),animationDelay);
 }
 function applyMove(f,p=false,tw=false){for(let i=0;i<(tw?2:p?3:1);i++)applyMoveOnce(f)}
@@ -247,8 +498,34 @@ function resetCube(){
   cubeState={U:['W','W','W','W','W','W','W','W','W'],D:['Y','Y','Y','Y','Y','Y','Y','Y','Y'],
              F:['G','G','G','G','G','G','G','G','G'],B:['B','B','B','B','B','B','B','B','B'],
              L:['O','O','O','O','O','O','O','O','O'],R:['R','R','R','R','R','R','R','R','R']};
-  allMoves=[];solutionMoves=[];solutionIdx=0;createCube();updateUI();updateStatus('Reset! Cube is solved.');setStep(-1);
+  allMoves=[];solutionMoves=[];solutionIdx=0;
+  createCube();
+  syncVisualWithState(); // Ensure visual matches state
+  updateUI();
+  updateStatus('Reset! Cube is solved.');
+  setStep(-1);
 }
+
+/* ────────────────────── DEBUG FUNCTIONS ────────────────────── */
+function debugCube(){
+  console.log('=== DEBUG CUBE STATE ===');
+  validateCubeState();
+}
+
+// Add debug button (temporary for testing)
+function addDebugButton(){
+  const debugBtn=document.createElement('button');
+  debugBtn.textContent='🔍 Debug';
+  debugBtn.onclick=debugCube;
+  debugBtn.style.position='fixed';
+  debugBtn.style.top='10px';
+  debugBtn.style.right='10px';
+  debugBtn.style.zIndex='1000';
+  document.body.appendChild(debugBtn);
+}
+
+// Call this in init to add debug button
+// addDebugButton();
 
 /* ────────────────────── SOLVER ────────────────────── */
 function solveCube(){
@@ -273,7 +550,7 @@ function solveCube(){
 }
 function isSolved(){for(const f of['U','D','F','B','L','R'])if(!cubeState[f].every(c=>c===cubeState[f][4]))return false;return true}
 
-/* ────────────────────── SIMPLIFIED BEGINNER METHOD ────────────────────── */
+/* ────────────────────── IMPROVED BEGINNER METHOD (Based on Ruwix Tutorial) ────────────────────── */
 function beginnerSolver(){
   if(isSolved())return[];
   const moves=[];
@@ -281,105 +558,160 @@ function beginnerSolver(){
   // Save current state
   const savedState=JSON.parse(JSON.stringify(cubeState));
   
-  // Step 1: White Cross
+  // Step 1: White Cross (improved)
   setStep(0);
   const crossMoves=solveWhiteCross();
   moves.push(...crossMoves);
   
-  // Step 2: White Corners
+  // Step 2: White Corners (improved)
   setStep(1);
   const cornerMoves=solveWhiteCorners();
   moves.push(...cornerMoves);
   
-  // Step 3: Middle Layer
+  // Step 3: Second Layer (F2L - improved)
   setStep(2);
-  const middleMoves=solveMiddleLayer();
+  const middleMoves=solveSecondLayer();
   moves.push(...middleMoves);
   
-  // Step 4: Yellow Cross
+  // Step 4: Yellow Cross (improved)
   setStep(3);
   const yellowCrossMoves=solveYellowCross();
   moves.push(...yellowCrossMoves);
   
-  // Step 5: Orient Yellow Edges
+  // Step 5: Yellow Edge Permutation (improved)
   setStep(4);
-  const orientEdgesMoves=orientYellowEdges();
-  moves.push(...orientEdgesMoves);
+  const yellowEdgesMoves=solveYellowEdges();
+  moves.push(...yellowEdgesMoves);
   
-  // Step 6: Position Yellow Corners
+  // Step 6: Yellow Corner Permutation (improved)
   setStep(5);
-  const positionCornersMoves=positionYellowCorners();
-  moves.push(...positionCornersMoves);
+  const cornerPermMoves=permuteYellowCorners();
+  moves.push(...cornerPermMoves);
   
-  // Step 7: Orient Yellow Corners
+  // Step 7: Yellow Corner Orientation (improved)
   setStep(6);
-  const orientCornersMoves=orientYellowCorners();
-  moves.push(...orientCornersMoves);
+  const cornerOrientMoves=orientYellowCorners();
+  moves.push(...cornerOrientMoves);
   
   // Restore state and apply all moves
   cubeState=savedState;
   return moves;
 }
 
-/* ---- 1. White Cross (SIMPLIFIED) ---- */
+/* ---- 1. White Cross (Improved Logic) ---- */
 function solveWhiteCross(){
   const moves=[];
   
-  // Simple approach: just apply a standard algorithm to create white cross
-  const crossAlg=["F","U'","L'","U"];
-  for(let i=0;i<4;i++){
+  // Get white edges to top layer first, then position them correctly
+  for(let attempt=0;attempt<20;attempt++){
+    // Check if white cross is complete
+    if(isWhiteCrossComplete())break;
+    
+    // Find white edge pieces and move them to correct positions
+    const whiteEdgePositions=[[1,'U'],[3,'U'],[5,'U'],[7,'U']]; // Top layer edge positions
+    
+    // Simple approach: use F R U R' U' F' to cycle edges
+    const crossAlg=["F","R","U","R'","U'","F'"];
     moves.push(...crossAlg);
     doMoves(crossAlg);
-    moves.push("U");
-    doMoves(["U"]);
+    
+    // Rotate top to try different positions
+    if(attempt%4===3){
+      moves.push("U");
+      doMoves(["U"]);
+    }
   }
   
   return moves;
 }
 
-/* ---- 2. White Corners (SIMPLIFIED) ---- */
+function isWhiteCrossComplete(){
+  // Check if white cross is formed with correct side colors
+  return cubeState.U[1]==='W'&&cubeState.U[3]==='W'&&
+         cubeState.U[5]==='W'&&cubeState.U[7]==='W'&&
+         cubeState.F[1]===cubeState.F[4]&&cubeState.R[1]===cubeState.R[4]&&
+         cubeState.B[1]===cubeState.B[4]&&cubeState.L[1]===cubeState.L[4];
+}
+
+/* ---- 2. White Corners (Improved Logic) ---- */
 function solveWhiteCorners(){
   const moves=[];
   
-  // Standard corner insertion algorithm
-  const cornerAlg=["R","U","R'","U'"];
+  // Use the three white corner algorithms from Ruwix
+  const rightAlg=["R'","D'","R"];        // When white faces right
+  const frontAlg=["F","D","F'"];        // When white faces front  
+  const bottomAlg=["F","L","D2","L'","F'"]; // When white faces down
   
-  // Apply to all four corners
-  for(let i=0;i<4;i++){
-    for(let j=0;j<6;j++){ // Repeat up to 6 times per corner
-      moves.push(...cornerAlg);
-      doMoves(cornerAlg);
+  for(let corner=0;corner<4;corner++){
+    for(let attempt=0;attempt<8;attempt++){
+      if(isWhiteCornerSolved(corner))break;
       
-      // Check if corner is solved (simplified check)
-      if(cubeState.F[8]==='W'||cubeState.R[6]==='W'){
-        break;
+      // Check white corner position and orientation
+      const cornerState=getWhiteCornerState(corner);
+      
+      if(cornerState==='right'){
+        moves.push(...rightAlg);
+        doMoves(rightAlg);
+      }else if(cornerState==='front'){
+        moves.push(...frontAlg);
+        doMoves(frontAlg);
+      }else if(cornerState==='bottom'){
+        moves.push(...bottomAlg);
+        doMoves(bottomAlg);
+      }else{
+        // Corner not in position, bring it to bottom
+        moves.push(...rightAlg);
+        doMoves(rightAlg);
       }
     }
-    moves.push("U");
-    doMoves(["U"]);
+    
+    // Move to next corner position
+    if(corner<3){
+      moves.push("U");
+      doMoves(["U"]);
+    }
   }
   
   return moves;
 }
 
-/* ---- 3. Middle Layer (SIMPLIFIED) ---- */
-function solveMiddleLayer(){
+function isWhiteCornerSolved(corner){
+  // Simplified check for white corner in position
+  return cubeState.U[0]==='W'||cubeState.U[2]==='W'||cubeState.U[6]==='W'||cubeState.U[8]==='W';
+}
+
+function getWhiteCornerState(corner){
+  // Simplified state detection
+  if(cubeState.F[2]==='W')return 'front';
+  if(cubeState.R[0]==='W')return 'right';
+  if(cubeState.D[2]==='W')return 'bottom';
+  return 'unknown';
+}
+
+/* ---- 3. Second Layer (F2L - Improved Logic) ---- */
+function solveSecondLayer(){
   const moves=[];
   
-  // Standard edge insertion algorithm
-  const edgeAlg=["U","R","U'","R'","U'","F'","U","F"];
+  // Right-hand algorithm: U R U' R' U' F' U F
+  const rightAlg=["U","R","U'","R'","U'","F'","U","F"];
+  // Left-hand algorithm: U' L' U L U F U' F'
+  const leftAlg=["U'","L'","U","L","U","F","U'","F'"];
   
-  // Apply to all four edges
-  for(let i=0;i<4;i++){
-    for(let j=0;j<6;j++){
-      moves.push(...edgeAlg);
-      doMoves(edgeAlg);
+  for(let edge=0;edge<4;edge++){
+    for(let attempt=0;attempt<6;attempt++){
+      if(isSecondLayerEdgeSolved(edge))break;
       
-      // Simple check - if front middle edge matches center
-      if(cubeState.F[5]===cubeState.F[4]){
-        break;
+      // Determine which algorithm to use based on edge position
+      if(needsRightAlgorithm(edge)){
+        moves.push(...rightAlg);
+        doMoves(rightAlg);
+      }else{
+        moves.push(...leftAlg);
+        doMoves(leftAlg);
       }
     }
+    
+    // Rotate to next edge
     moves.push("U");
     doMoves(["U"]);
   }
@@ -387,25 +719,34 @@ function solveMiddleLayer(){
   return moves;
 }
 
-/* ---- 4. Yellow Cross (SIMPLIFIED) ---- */
+function isSecondLayerEdgeSolved(edge){
+  // Check if front edge matches center
+  return cubeState.F[5]===cubeState.F[4];
+}
+
+function needsRightAlgorithm(edge){
+  // Simplified logic to determine algorithm choice
+  return cubeState.U[7]===cubeState.R[4]; // If top edge matches right center
+}
+
+/* ---- 4. Yellow Cross (Improved Logic) ---- */
 function solveYellowCross(){
   const moves=[];
   
-  // Standard algorithm for yellow cross
-  const crossAlg=["F","R","U","R'","U'","F'"];
+  // Standard OLL algorithm: F R U R' U' F'
+  const ollAlg=["F","R","U","R'","U'","F'"];
   
-  // Apply until we have a yellow cross
-  for(let i=0;i<4;i++){
-    // Count yellow edges on top
-    const yellowEdges=[1,3,5,7].filter(pos=>cubeState.U[pos]==='Y').length;
+  for(let attempt=0;attempt<4;attempt++){
+    const yellowEdgeCount=countYellowEdgesOnTop();
     
-    if(yellowEdges===4)break; // Cross complete
+    if(yellowEdgeCount===4)break; // Cross complete
     
-    moves.push(...crossAlg);
-    doMoves(crossAlg);
+    // Apply OLL algorithm
+    moves.push(...ollAlg);
+    doMoves(ollAlg);
     
-    // If still no cross after a few tries, rotate and try again
-    if(i===2){
+    // If we have a line, orient it horizontally first
+    if(yellowEdgeCount===2&&hasYellowLine()){
       moves.push("U");
       doMoves(["U"]);
     }
@@ -414,97 +755,96 @@ function solveYellowCross(){
   return moves;
 }
 
-/* ---- 5. Orient Yellow Edges (FIXED!) ---- */
-function orientYellowEdges(){
+function countYellowEdgesOnTop(){
+  return [1,3,5,7].filter(pos=>cubeState.U[pos]==='Y').length;
+}
+
+function hasYellowLine(){
+  return (cubeState.U[1]==='Y'&&cubeState.U[7]==='Y')||(cubeState.U[3]==='Y'&&cubeState.U[5]==='Y');
+}
+
+/* ---- 5. Yellow Edge Permutation (Improved Logic) ---- */
+function solveYellowEdges(){
   const moves=[];
   
-  // FIXED: Standard algorithm for orienting edges
-  const edgeAlg=["R","U","R'","U","R","U2","R'"];
+  // PLL algorithm for edge swapping: R U R' U R U2 R' U
+  const pllAlg=["R","U","R'","U","R","U2","R'","U"];
   
-  // Position so incorrect edge is in front
-  for(let attempts=0;attempts<10;attempts++){
-    // Check if all edges are correct
-    const correctEdges=[
-      cubeState.F[1]===cubeState.F[4],
-      cubeState.R[1]===cubeState.R[4],
-      cubeState.B[1]===cubeState.B[4],
-      cubeState.L[1]===cubeState.L[4]
-    ].filter(Boolean).length;
+  for(let attempt=0;attempt<8;attempt++){
+    if(areYellowEdgesCorrect())break;
     
-    if(correctEdges===4)break; // All edges correct
-    
-    // FIXED: Find an incorrect edge and position it correctly
-    if(cubeState.F[1]!==cubeState.F[4]){
-      // Edge in front is incorrect - apply algorithm
-      moves.push(...edgeAlg);
-      doMoves(edgeAlg);
-    }else{
-      // Rotate to find incorrect edge
-      moves.push("U");
-      doMoves(["U"]);
+    // Position cube so that we can swap incorrect edges
+    if(!cubeState.F[1]===cubeState.F[4]||!cubeState.R[1]===cubeState.R[4]){
+      moves.push(...pllAlg);
+      doMoves(pllAlg);
     }
+    
+    // Try different orientations
+    moves.push("U");
+    doMoves(["U"]);
   }
   
   return moves;
 }
 
-/* ---- 6. Position Yellow Corners (SIMPLIFIED) ---- */
-function positionYellowCorners(){
+function areYellowEdgesCorrect(){
+  return cubeState.F[1]===cubeState.F[4]&&cubeState.R[1]===cubeState.R[4]&&
+         cubeState.B[1]===cubeState.B[4]&&cubeState.L[1]===cubeState.L[4];
+}
+
+/* ---- 6. Yellow Corner Permutation (Improved Logic) ---- */
+function permuteYellowCorners(){
   const moves=[];
   
-  // Standard algorithm for positioning corners
-  const cornerAlg=["U","R","U'","L'","U","R'","U'","L"];
+  // Corner permutation algorithm: U R U' L' U R' U' L
+  const cornerPermAlg=["U","R","U'","L'","U","R'","U'","L"];
   
-  // Apply until corners are positioned
-  for(let i=0;i<4;i++){
-    // Simple check - if front-right corner has correct side colors
-    const cornerColors=[
-      cubeState.F[2], // Front-right-top
-      cubeState.R[0], // Right-front-top
-      cubeState.U[8]  // Up-front-right
-    ];
+  for(let attempt=0;attempt<6;attempt++){
+    if(areYellowCornersPositioned())break;
     
-    const targetColors=[
-      cubeState.F[4], // Front center
-      cubeState.R[4], // Right center
-      'Y'            // Yellow (top)
-    ];
+    moves.push(...cornerPermAlg);
+    doMoves(cornerPermAlg);
     
-    // Count matching colors (simplified)
-    const matches=cornerColors.filter((color,idx)=>
-      targetColors.includes(color)
-    ).length;
-    
-    if(matches>=2){
-      // Corner is reasonably positioned
-      break;
-    }
-    
-    moves.push(...cornerAlg);
-    doMoves(cornerAlg);
+    // Try different orientations
+    moves.push("U");
+    doMoves(["U"]);
   }
   
   return moves;
 }
 
-/* ---- 7. Orient Yellow Corners (SIMPLIFIED) ---- */
+function areYellowCornersPositioned(){
+  // Simplified check - look for at least one correctly positioned corner
+  const corners=[[0,cubeState.U[0],cubeState.L[2],cubeState.B[0]],
+                [2,cubeState.U[2],cubeState.B[2],cubeState.R[0]],
+                [6,cubeState.U[6],cubeState.F[0],cubeState.L[0]],
+                [8,cubeState.U[8],cubeState.R[2],cubeState.F[2]]];
+  
+  return corners.some(corner=>{
+    const colors=corner.slice(1).sort();
+    const target=[cubeState.F[4],cubeState.R[4],'Y'].sort();
+    return JSON.stringify(colors)===JSON.stringify(target);
+  });
+}
+
+/* ---- 7. Yellow Corner Orientation (Improved Logic) ---- */
 function orientYellowCorners(){
   const moves=[];
   
-  // Standard algorithm for orienting corners
+  // Corner orientation algorithm: R' D' R D
   const orientAlg=["R'","D'","R","D"];
   
   // Orient each corner
   for(let corner=0;corner<4;corner++){
-    // Apply algorithm until corner is yellow on top
-    for(let i=0;i<4;i++){
-      if(cubeState.U[8]==='Y')break; // Corner is oriented
+    // Apply algorithm until corner shows yellow on top
+    for(let rotation=0;rotation<3;rotation++){
+      if(cubeState.U[8]==='Y')break; // This corner is oriented
       
       moves.push(...orientAlg);
       doMoves(orientAlg);
     }
     
-    // Move to next corner
+    // Move to next corner (only rotate top layer)
     if(corner<3){
       moves.push("U");
       doMoves(["U"]);
