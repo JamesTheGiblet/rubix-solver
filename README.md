@@ -23,7 +23,7 @@ A sophisticated 3D Rubik's Cube solver built with Three.js that features interac
 - **Smart Face Detection**: Click on any visible face to paint
 - **Real-time Updates**: Visual and internal state synchronization
 
-### 🤖 Advanced Solving System
+### 🤖 Advanced Solving System !!!still working on this!!!
 
 - **Layer-by-Layer Method**: Implements the beginner's 7-step solving approach
 - **Step-by-Step Progress**: Visual indicators for each solving phase
